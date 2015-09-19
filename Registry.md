@@ -216,7 +216,94 @@ OK,至此，根证书等制作完成
 		}
 		
 这里要说明两个地方：proxy_set_header  X-Forwarded-Proto $scheme;注意这里没有\$scheme，如果配置则会报：</br>
-**unsupported protocol scheme ""**
+**unsupported protocol scheme ""**</br>
+
+**PS**:认证是LDAP的可以在nginx里设置一下</br>
+
+		user  www www;
+		worker_processes  auto;
+
+		error_log   /var/log/nginx_error.log error;
+		#error_log  logs/error.log  notice;
+		#error_log  logs/error.log  info;
+
+		#pid        logs/nginx.pid;
+
+
+		worker_rlimit_nofile 51200;
+
+		events {
+			use epoll;
+			worker_connections  51200;
+			multi_accept on;
+		}
+
+		http {
+			include       mime.types;
+			default_type  application/octet-stream;
+
+			log_format  main  '$remote_addr - $remote_user [$time_local] "$request" '
+							  '$status $body_bytes_sent "$http_referer" '
+							  '"$http_user_agent" "$http_x_forwarded_for"';
+
+			access_log  /var/log/nginx_access.log  main;
+
+			server_names_hash_bucket_size 128;
+			client_header_buffer_size 32k;
+			large_client_header_buffers 4 32k;
+
+			sendfile        on;
+			tcp_nopush     on;
+			tcp_nodelay    on;
+
+			#keepalive_timeout  0;
+			keepalive_timeout  65;
+
+			#gzip  on;
+		   
+			upstream registry {
+				server 192.168.172.150:5000;
+			}    
+			
+			ldap_server ldapserver {
+				url ldap://xxxxxxxxx:389/OU=Users,DC=xxxxx,DC=it?samaccountname?sub?(objectClass=user);
+				binddn xxxxx@xxxxxxxxxx.it;
+				binddn_passwd xxxxxxxxxxxx
+				group_attribute uniquemember;
+				group_attribute_is_dn on;
+			}
+			
+			server {
+				listen       443;
+				server_name  192.168.172.150;
+				
+				ssl          on;
+				ssl_certificate /etc/nginx/ssl/nginx.crt;
+				ssl_certificate_key /etc/nginx/ssl/nginx.key;
+
+				client_max_body_size 0;
+
+				chunked_transfer_encoding on;
+
+				location /v2/ {
+				  auth_ldap "Forbidden";
+				  auth_ldap_servers ldapserver;
+				  add_header 'Docker-Distribution-Api-Version' 'registry/2.0' always;
+				  
+				  proxy_pass                          http://registry;
+				  proxy_set_header  Host              \$http_host;   # required for docker client's sake
+				  proxy_set_header  X-Real-IP         \$remote_addr; # pass on real client's IP
+				  proxy_set_header  X-Forwarded-For   \$proxy_add_x_forwarded_for;
+				  proxy_set_header  X-Forwarded-Proto $scheme;
+				  proxy_read_timeout                  900;
+				}
+
+				error_page   500 502 503 504  /50x.html;
+				location = /50x.html {
+					root   html;
+				}
+			}
+		}
 
 还有一个地方：如果之前有配置过V1的，可以保留，但最好分离出来，我是直接注掉了。
 
